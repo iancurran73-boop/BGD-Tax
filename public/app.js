@@ -229,7 +229,11 @@ function rOverview() {
   <div class="ph">
     <div class="ph-row">
       <div><div class="pt">Hi Brian 👋</div><div class="ps">Tax year 2025/26 — 6 Apr 2025 to 5 Apr 2026</div></div>
-      <button class="btn btn-outline" onclick="doExport('all')"><i class="ti ti-download" aria-hidden="true"></i>Export all CSV</button>
+      <div style="display:flex;gap:7px;flex-wrap:wrap">
+        <button class="btn btn-outline" onclick="doExport('all')"><i class="ti ti-download" aria-hidden="true"></i>Export CSV</button>
+        <button class="btn btn-outline" onclick="archiveAndClear()"><i class="ti ti-archive" aria-hidden="true"></i>Archive & clear</button>
+        <label class="btn btn-outline" style="cursor:pointer"><i class="ti ti-upload" aria-hidden="true"></i>Import CSV<input type="file" accept=".csv" style="display:none" onchange="handleCsvUpload(this,null)"></label>
+      </div>
     </div>
   </div>
   <div class="pb">
@@ -843,6 +847,47 @@ function exportTaxSummary() {
   URL.revokeObjectURL(url)
 }
 
+// ── Archive & overwrite ───────────────────────────────────────────
+
+async function archiveAndClear() {
+  const count = S.txs.length
+  if (!confirm(`This will:\n1. Export all ${count} transactions to CSV (your backup)\n2. Delete all transactions from the database\n\nReady to continue?`)) return
+  // Step 1: export backup
+  doExport('all')
+  // Brief pause to let download start
+  await new Promise(r => setTimeout(r, 600))
+  // Step 2: clear all
+  try {
+    const result = await api('DELETE', '/api/transactions/all')
+    S.txs = []
+    showToast(`Archived and cleared ${result.deleted} transactions`)
+    rMain()
+  } catch (err) { showToast('Clear failed — your export is safe: ' + err.message, false) }
+}
+
+async function overwriteFromCsv(inp) {
+  const f = inp.files[0]; if (!f) return
+  if (!confirm('This will DELETE all existing transactions then import the CSV. Your current data will be lost unless you export first.\n\nContinue?')) return
+  // Export backup first
+  doExport('all')
+  await new Promise(r => setTimeout(r, 600))
+  // Clear all
+  try {
+    await api('DELETE', '/api/transactions/all')
+    S.txs = []
+    // Now parse and import
+    const reader = new FileReader()
+    reader.onload = e => {
+      const rows = parseCsvImport(e.target.result, null)
+      if (!rows.length) return showToast('No valid rows in CSV', false)
+      S.csvRows   = rows
+      S.csvImport = true
+      rMain()
+    }
+    reader.readAsText(f)
+  } catch (err) { showToast('Failed: ' + err.message, false) }
+}
+
 // ── Mileage actions ───────────────────────────────────────────────
 
 async function addMileageJourney() {
@@ -914,7 +959,7 @@ async function confirmCsvImport() {
 
 // ── Expose globals ────────────────────────────────────────────────
 
-Object.assign(window, { go, rMain, S, doAdd, delTx, confirmClear, doClear, doExport, exportTaxSummary, rAddCats, loadAll, addMileageJourney, delMileage, addMileageToMTD, exportMileage, handleCsvUpload, confirmCsvImport })
+Object.assign(window, { go, rMain, S, doAdd, delTx, confirmClear, doClear, doExport, exportTaxSummary, rAddCats, loadAll, addMileageJourney, delMileage, addMileageToMTD, exportMileage, handleCsvUpload, confirmCsvImport, archiveAndClear, overwriteFromCsv })
 
 // ── Init ──────────────────────────────────────────────────────────
 

@@ -115,3 +115,10 @@ app.delete('/api/mileage/:id', wrap(async (req, res) => {
   await pool.query('DELETE FROM mileage_log WHERE id = $1', [req.params.id])
   res.status(204).end()
 }))
+
+// ── Archive / clear all ───────────────────────────────────────────────────────
+
+app.delete('/api/transactions/all', wrap(async (req, res) => {
+  const { rowCount } = await pool.query('DELETE FROM transactions')
+  res.json({ deleted: rowCount })
+}))
