@@ -230,6 +230,7 @@ function rOverview() {
     <div class="ph-row">
       <div><div class="pt">Hi Brian 👋</div><div class="ps">Tax year 2025/26 — 6 Apr 2025 to 5 Apr 2026</div></div>
       <div style="display:flex;gap:7px;flex-wrap:wrap">
+        <button class="btn btn-outline" onclick="loadAll()"><i class="ti ti-refresh" aria-hidden="true"></i>Refresh</button>
         <button class="btn btn-outline" onclick="doExport('all')"><i class="ti ti-download" aria-hidden="true"></i>Export CSV</button>
         <button class="btn btn-outline" onclick="archiveAndClear()"><i class="ti ti-archive" aria-hidden="true"></i>Archive & clear</button>
         <label class="btn btn-outline" style="cursor:pointer"><i class="ti ti-upload" aria-hidden="true"></i>Import CSV<input type="file" accept=".csv" style="display:none" onchange="handleCsvUpload(this,null)"></label>
@@ -1170,18 +1171,27 @@ function exportMileage() {
 
 async function confirmCsvImport() {
   const fresh = S.csvRows.filter(r => !r.isDup)
-  if (!fresh.length) return showToast('Nothing new to import', false)
+  if (!fresh.length) {
+    // All rows are duplicates — data may already be in DB, just reload
+    showToast('All rows already imported — refreshing display...')
+    S.csvRows = []; S.csvImport = false
+    await loadAll()
+    return
+  }
   const payload = fresh.map(r => ({
     transaction_date: r.date, description: r.desc, amount: r.amt,
     direction: r.direction, category: r.category, quarter: r.quarter,
     pay_method: r.payMethod || 'bank', notes: r.notes || '',
   }))
   try {
-    await api('POST', '/api/transactions', payload)
+    const result = await api('POST', '/api/transactions', payload)
+    const saved = Array.isArray(result) ? result : [result]
     S.csvRows = []; S.csvImport = false
-    showToast(`${fresh.length} transaction${fresh.length===1?'':'s'} imported — reloading...`)
+    showToast(`${saved.length} transaction${saved.length===1?'':'s'} imported`)
     await loadAll()
-  } catch (err) { showToast(err.message, false) }
+  } catch (err) {
+    alert('Import failed: ' + err.message)
+  }
 }
 
 // ── Expose globals ────────────────────────────────────────────────
