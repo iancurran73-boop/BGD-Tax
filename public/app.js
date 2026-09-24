@@ -1118,6 +1118,8 @@ async function saveAnnualMiles() {
   showToast(`${total.toFixed(0)} miles = £${totalClaim.toFixed(2)} added across all quarters`)
   rMain()
 }
+
+async function addMileageJourney() {
   const m = { journey_date: v('ml-dt'), quarter: v('ml-q'), from_location: v('ml-fr'), to_location: v('ml-to'), miles: fv('ml-mi'), purpose: v('ml-pu'), notes: v('ml-no') }
   if (!m.journey_date || !m.purpose || !m.miles) return alert('Date, purpose and miles are required.')
   try {
