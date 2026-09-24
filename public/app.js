@@ -1177,12 +1177,10 @@ async function confirmCsvImport() {
     pay_method: r.payMethod || 'bank', notes: r.notes || '',
   }))
   try {
-    const result = await api('POST', '/api/transactions', payload)
-    const saved = Array.isArray(result) ? result : [result]
-    S.txs.push(...saved)
+    await api('POST', '/api/transactions', payload)
     S.csvRows = []; S.csvImport = false
-    showToast(`${saved.length} transaction${saved.length===1?'':'s'} imported`)
-    rMain()
+    showToast(`${fresh.length} transaction${fresh.length===1?'':'s'} imported — reloading...`)
+    await loadAll()
   } catch (err) { showToast(err.message, false) }
 }
 
