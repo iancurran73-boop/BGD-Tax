@@ -170,9 +170,9 @@ async function loadAll() {
   try {
     const [txs, mileage] = await Promise.all([
       api('GET', '/api/transactions'),
-      api('GET', '/api/mileage'),
+      api('GET', '/api/mileage').catch(() => []),
     ])
-    S.txs = txs
+    S.txs     = txs
     S.mileage = mileage
     S.loading = false
     rMain()
