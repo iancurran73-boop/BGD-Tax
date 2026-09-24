@@ -237,6 +237,7 @@ function rOverview() {
       </div>
     </div>
   </div>
+  ${S.csvImport ? rCsvPreview(null) : ''}
   <div class="pb">
     <div class="sg">
       <div class="sc green"><div class="sl">Total income</div><div class="sv">${fmt(yr.income)}</div><div class="ss">${S.txs.filter(t=>t.direction==='income').length} entries</div></div>
@@ -747,7 +748,7 @@ function parseCsvImport(text, defaultQ) {
   const header = lines[0].split(',').map(h => h.replace(/['"]/g,'').trim().toLowerCase())
   const col = name => header.findIndex(h => h.includes(name))
   const get = (parts, name) => (parts[col(name)] || '').replace(/^"|"$/g,'').trim()
-  const dupKey = new Set(S.txs.map(t => t.transaction_date + '_' + t.amount + '_' + t.description.slice(0,20)))
+  const dupKey = new Set(S.txs.map(t => t.transaction_date + '_' + parseFloat(t.amount) + '_' + t.description.slice(0,20)))
   const rows = []
   for (let i = 1; i < lines.length; i++) {
     const parts = splitCsvLine(lines[i])
