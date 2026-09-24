@@ -69,7 +69,7 @@ let S = {
   mileage: [],
   loading: true,
   addForm: false,
-  addMileage: false,
+  mileageMode: 'quarterly',  // 'annual' | 'quarterly' | 'journey'
   filterDir: 'all',
   filterCat: 'all',
   search: '',
@@ -540,99 +540,177 @@ function calcMileage(logs) {
 function rMileage() {
   const sorted = [...S.mileage].sort((a,b) => a.journey_date.localeCompare(b.journey_date))
   const { detailed, totalMiles, totalClaim } = calcMileage(sorted)
-  const pct = Math.min(100, (totalMiles / MILEAGE_RATES.threshold) * 100)
+  const pct  = Math.min(100, (totalMiles / MILEAGE_RATES.threshold) * 100)
   const over = totalMiles > MILEAGE_RATES.threshold
+  const maxClaim = MILEAGE_RATES.threshold * MILEAGE_RATES.low  // £4,500
 
+  // Per-quarter breakdown considering cumulative threshold
   const qBreak = ['Q1','Q2','Q3','Q4'].map(q => {
-    const preLogs  = sorted.filter(m => m.quarter < q)
-    const thisLogs = sorted.filter(m => m.quarter === q)
-    const qMiles   = thisLogs.reduce((s,m) => s + Number(m.miles), 0)
-    const { totalClaim: preClaim } = calcMileage(preLogs)
-    const { totalClaim: combined } = calcMileage([...preLogs, ...thisLogs])
-    return { q, miles: qMiles, claim: Math.round((combined - preClaim) * 100) / 100 }
+    const pre  = sorted.filter(m => m.quarter < q)
+    const cur  = sorted.filter(m => m.quarter === q)
+    const qMi  = cur.reduce((s,m) => s + Number(m.miles), 0)
+    const { totalClaim: preClaim } = calcMileage(pre)
+    const { totalClaim: combined } = calcMileage([...pre, ...cur])
+    return { q, miles: qMi, claim: Math.round((combined - preClaim)*100)/100 }
   })
+
+  // Already added to MTD this quarter?
+  const addedQs = new Set(S.txs.filter(t => t.description && t.description.includes('HMRC mileage claim')).map(t => t.quarter))
+
+  const mode = S.mileageMode
 
   return `
   <div class="ph">
     <div class="ph-row">
-      <div><div class="pt">Mileage Log</div><div class="ps">HMRC approved rates 2025/26 · 45p/mile (first 10,000) · 25p/mile above</div></div>
-      <div style="display:flex;gap:7px">
-        <button class="btn btn-primary" onclick="S.addMileage=!S.addMileage;rMain()"><i class="ti ti-plus" aria-hidden="true"></i>Add journey</button>
-        <button class="btn btn-outline" onclick="exportMileage()"><i class="ti ti-download" aria-hidden="true"></i>Export</button>
+      <div><div class="pt">Mileage</div><div class="ps">HMRC Approved Mileage Allowance Payments (AMAP)</div></div>
+      <button class="btn btn-outline" onclick="exportMileage()"><i class="ti ti-download" aria-hidden="true"></i>Export log</button>
+    </div>
+  </div>
+
+  <!-- HMRC limits banner -->
+  <div style="padding:12px 24px;background:#F0FDF4;border-bottom:1px solid #BBF7D0">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+      <div><div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#166534;margin-bottom:3px">First 10,000 miles</div><div style="font-size:20px;font-weight:700;color:#166534">45p<span style="font-size:13px;font-weight:400">/mile</span></div></div>
+      <div><div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#92400E;margin-bottom:3px">Above 10,000 miles</div><div style="font-size:20px;font-weight:700;color:#92400E">25p<span style="font-size:13px;font-weight:400">/mile</span></div></div>
+      <div><div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#1E40AF;margin-bottom:3px">Max claim at threshold</div><div style="font-size:20px;font-weight:700;color:#1E40AF">${fmt(maxClaim)}</div><div style="font-size:11px;color:#94A3B8">if you do 10,000+ miles</div></div>
+    </div>
+    <div style="margin-top:10px">
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:#6B7280;margin-bottom:4px"><span>You've logged: <strong>${totalMiles.toFixed(0)} miles = ${fmt(totalClaim)}</strong></span><span>10,000 mile threshold</span></div>
+      <div style="height:7px;background:#D1FAE5;border-radius:4px;overflow:hidden">
+        <div style="height:100%;width:${pct}%;background:${pct>=100?'#D97706':'#059669'};border-radius:4px"></div>
       </div>
+      ${over ? `<div style="margin-top:5px;font-size:11.5px;color:#92400E"><i class="ti ti-info-circle" aria-hidden="true"></i> You've passed 10,000 miles — remaining miles claim at 25p</div>` : `<div style="margin-top:5px;font-size:11.5px;color:#6B7280">${(MILEAGE_RATES.threshold - totalMiles).toFixed(0)} miles remaining at 45p</div>`}
+    </div>
+    <div style="margin-top:8px;padding:8px 10px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:7px;font-size:11.5px;color:#92400E">
+      <strong>Evidence needed:</strong> HMRC require a mileage log showing date, miles, and business purpose for each trip. A quarterly total with job descriptions is acceptable for small businesses.
     </div>
   </div>
 
-  <div style="padding:14px 24px;background:#fff;border-bottom:1px solid var(--border)">
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">
-      <div class="sc"><div class="sl">Total miles</div><div class="sv">${totalMiles.toLocaleString('en-GB',{maximumFractionDigits:1})}</div><div class="ss">of 10,000 threshold</div></div>
-      <div class="sc ${over?'amber':'green'}"><div class="sl">Total claimable</div><div class="sv">${fmt(totalClaim)}</div><div class="ss">${over?'mixed rate (45p/25p)':'at 45p per mile'}</div></div>
-      <div class="sc"><div class="sl">Rate</div><div class="sv" style="font-size:15px">${over?'Mixed':'45p/mile'}</div><div class="ss">${over?`${(totalMiles-10000).toFixed(0)} miles at 25p`:'below 10,000 threshold'}</div></div>
-    </div>
-    <div style="margin-bottom:5px;display:flex;justify-content:space-between;font-size:11px;color:var(--text-lt)">
-      <span>${totalMiles.toFixed(0)} miles driven</span><span>10,000 mile threshold</span>
-    </div>
-    <div style="height:8px;background:var(--border);border-radius:4px;overflow:hidden">
-      <div style="height:100%;width:${pct}%;background:${pct>=100?'var(--amber)':'var(--green)'};border-radius:4px"></div>
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px">
-      ${qBreak.map(({q,miles,claim}) => `<div style="padding:8px 10px;background:var(--surface);border:1px solid var(--border);border-radius:7px">
-        <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-lt);margin-bottom:3px">${q}</div>
-        <div style="font-size:13px;font-weight:500">${miles.toFixed(0)} mi</div>
-        <div style="font-size:11px;color:var(--green);margin-top:1px">${fmt(claim)}</div>
-      </div>`).join('')}
-    </div>
+  <!-- Mode tabs -->
+  <div class="qtabs">
+    <button class="qt${mode==='quarterly'?' on':''}" onclick="S.mileageMode='quarterly';rMain()">Quarterly totals</button>
+    <button class="qt${mode==='annual'?' on':''}" onclick="S.mileageMode='annual';rMain()">Annual total</button>
+    <button class="qt${mode==='journey'?' on':''}" onclick="S.mileageMode='journey';rMain()">Journey log</button>
   </div>
 
-  ${S.addMileage ? `<div class="iform">
-    <div class="fg">
-      <div><label>Date</label><input type="date" id="ml-dt" value="${tod()}" max="2026-04-05"></div>
-      <div><label>Quarter</label><select id="ml-q"><option value="Q1">Q1 Apr–Jun 2025</option><option value="Q2">Q2 Jul–Sep 2025</option><option value="Q3">Q3 Oct–Dec 2025</option><option value="Q4" selected>Q4 Jan–Mar 2026</option></select></div>
-      <div><label>From</label><input type="text" id="ml-fr" placeholder="Home / Gateshead"></div>
-      <div><label>To</label><input type="text" id="ml-to" placeholder="Customer address or job site"></div>
-      <div><label>Miles</label><input type="number" id="ml-mi" step="0.1" min="0.1" placeholder="0.0"></div>
-      <div><label>Purpose</label><input type="text" id="ml-pu" placeholder="e.g. Bathroom refit — 14 Oak Street"></div>
-      <div class="s2"><label>Notes</label><input type="text" id="ml-no"></div>
-    </div>
-    <div class="frow">
-      <button class="btn btn-primary" onclick="addMileageJourney()"><i class="ti ti-check" aria-hidden="true"></i>Save journey</button>
-      <button class="btn btn-outline" onclick="S.addMileage=false;rMain()">Cancel</button>
-    </div>
-  </div>` : ''}
+  ${mode === 'quarterly' ? rMileageQuarterly(qBreak, addedQs) : ''}
+  ${mode === 'annual'    ? rMileageAnnual(totalMiles, totalClaim) : ''}
+  ${mode === 'journey'   ? rMileageJourney(detailed, totalMiles, totalClaim) : ''}
+  `
+}
 
-  <div style="padding:12px 24px">
-    <div class="card" style="margin-bottom:12px">
-      <div class="ch"><span class="ct">Journey log</span><span class="xs mu">${sorted.length} journeys · ${totalMiles.toFixed(1)} miles</span></div>
-      <div class="tbl-wrap"><table class="tbl">
-        <thead><tr><th style="width:11%">Date</th><th style="width:14%">From</th><th style="width:14%">To</th><th style="width:26%">Purpose</th><th style="width:6%">Q</th><th style="width:7%">Miles</th><th style="width:9%">Claim</th><th style="width:7%">Rate</th><th style="width:6%"></th></tr></thead>
-        <tbody>
-        ${detailed.length ? detailed.map(m => `<tr>
-          <td class="xs mu">${fds(m.journey_date)}</td>
-          <td class="xs mu">${m.from_location||'—'}</td>
-          <td class="xs mu">${m.to_location||'—'}</td>
-          <td class="fw xs">${m.purpose}</td>
-          <td>${bdg('b-rv',m.quarter)}</td>
-          <td class="fw">${m.miles}</td>
-          <td class="fw" style="color:var(--green)">${fmt(m.claim)}</td>
-          <td class="xs mu">${m.claim/m.miles >= 0.44?'45p':'25p'}</td>
-          <td><button class="del-btn" onclick="delMileage('${m.id}')"><i class="ti ti-trash" aria-hidden="true"></i></button></td>
-        </tr>`).join('') : '<tr><td colspan="9" class="empty">No journeys yet — add your first journey above.</td></tr>'}
-        </tbody>
-      </table></div>
-      ${detailed.length ? `<div style="padding:9px 14px;background:var(--surface);border-top:1px solid var(--border);display:flex;justify-content:space-between;font-size:12.5px"><span style="color:var(--text-mid)">Total: ${totalMiles.toFixed(1)} miles</span><span style="font-weight:600;color:var(--green)">${fmt(totalClaim)} claimable</span></div>` : ''}
+function rMileageQuarterly(qBreak, addedQs) {
+  // Live calculation: read input values if present, else use logged totals
+  return `
+  <div style="padding:16px 24px">
+    <div style="font-size:13px;color:var(--text-mid);margin-bottom:14px">
+      Enter your total miles per quarter — the claim is calculated automatically against the 10,000 mile threshold.
+      Click <strong>Save & add to MTD</strong> to log the miles and create the expense entry in one step.
     </div>
-
     <div class="card">
-      <div class="ch"><span class="ct">Add mileage claim to MTD</span><span class="xs mu">Creates a travel expense entry per quarter</span></div>
-      ${qBreak.filter(b => b.claim > 0).length ? qBreak.filter(b => b.claim > 0).map(({q,miles,claim}) =>
-        `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--border)">
-          <div><div class="fw xs">${q} — ${miles.toFixed(0)} miles</div><div class="xs mu">HMRC mileage claim</div></div>
-          <div style="display:flex;align-items:center;gap:10px"><span class="fw" style="color:var(--green)">${fmt(claim)}</span><button class="btn btn-primary btn-sm" onclick="addMileageToMTD('${q}',${claim})"><i class="ti ti-plus" aria-hidden="true"></i>Add to ${q}</button></div>
-        </div>`).join('')
-      : '<div class="empty">Log journeys above then add the claim to your quarterly MTD records.</div>'}
+      ${['Q1','Q2','Q3','Q4'].map((q,i) => {
+        const info = QUARTERS[q]
+        const existing = qBreak[i]
+        const alreadyAdded = addedQs.has(q)
+        return `<div style="display:grid;grid-template-columns:80px 1fr 100px 120px 140px;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border)">
+          <div><div style="font-size:12px;font-weight:600;color:var(--text)">${q}</div><div style="font-size:10.5px;color:var(--text-lt)">${info.period}</div></div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <input type="number" id="qmi-${q}" placeholder="0" min="0" step="1" value="${existing.miles > 0 ? existing.miles.toFixed(0) : ''}"
+              style="width:90px;font-size:14px;padding:6px 9px;border:1px solid var(--border2);border-radius:7px;font-family:inherit;background:var(--surface)"
+              oninput="previewQMiles('${q}')">
+            <span style="font-size:12px;color:var(--text-lt)">miles</span>
+          </div>
+          <div id="qclaim-${q}" style="font-size:13px;font-weight:600;color:var(--green)">${existing.miles > 0 ? fmt(existing.claim) : '—'}</div>
+          <div>${existing.miles > 0 ? `${bdg('b-rv',q)} ${existing.miles.toFixed(0)} mi logged` : '<span style="font-size:11px;color:var(--text-lt)">Not logged yet</span>'}</div>
+          <div>
+            ${alreadyAdded
+              ? `<span style="font-size:11.5px;color:var(--green)"><i class="ti ti-check" aria-hidden="true"></i> Added to MTD</span>`
+              : `<button class="btn btn-primary btn-sm" onclick="saveQuarterlyMiles('${q}')"><i class="ti ti-device-floppy" aria-hidden="true"></i>Save & add to MTD</button>`}
+          </div>
+        </div>`
+      }).join('')}
+    </div>
+    <div style="margin-top:10px;font-size:11.5px;color:var(--text-lt)">
+      <i class="ti ti-info-circle" aria-hidden="true"></i> Saving replaces any existing logged miles for that quarter and creates a travel expense entry in your MTD records.
     </div>
   </div>`
 }
+
+function rMileageAnnual(currentMiles, currentClaim) {
+  return `
+  <div style="padding:16px 24px">
+    <div style="font-size:13px;color:var(--text-mid);margin-bottom:14px">
+      Enter your total business miles for the whole 2025/26 tax year. The app will split them evenly across quarters and add to your MTD records.
+    </div>
+    <div class="card" style="padding:18px">
+      <div style="display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:16px">
+        <div>
+          <label style="display:block;font-size:11px;font-weight:500;color:var(--text-mid);margin-bottom:5px">Total miles for 2025/26</label>
+          <input type="number" id="ann-miles" placeholder="e.g. 8000" min="0" step="1" value="${currentMiles > 0 ? currentMiles.toFixed(0) : ''}"
+            style="width:140px;font-size:18px;font-weight:600;padding:8px 12px;border:1px solid var(--border2);border-radius:7px;font-family:inherit"
+            oninput="previewAnnualMiles()">
+        </div>
+        <div id="ann-preview" style="padding:10px 14px;background:var(--surface);border-radius:7px;min-width:160px">
+          ${currentMiles > 0 ? `<div style="font-size:11px;color:var(--text-lt)">Total claim</div><div style="font-size:22px;font-weight:700;color:var(--green)">${fmt(currentClaim)}</div><div style="font-size:11px;color:var(--text-lt)">split across 4 quarters</div>` : '<div style="font-size:12px;color:var(--text-lt)">Enter miles to see claim</div>'}
+        </div>
+      </div>
+      <div id="ann-breakdown" style="margin-bottom:14px"></div>
+      <button class="btn btn-primary" onclick="saveAnnualMiles()"><i class="ti ti-device-floppy" aria-hidden="true"></i>Save & add to all quarters</button>
+    </div>
+  </div>`
+}
+
+function rMileageJourney(detailed, totalMiles, totalClaim) {
+  return `
+  <div style="padding:0">
+    <div style="padding:10px 24px 0;display:flex;justify-content:flex-end">
+      <button class="btn btn-primary" onclick="S.addMileage=!S.addMileage;rMain()" style="margin-top:10px"><i class="ti ti-plus" aria-hidden="true"></i>Add journey</button>
+    </div>
+
+    ${S.addMileage ? `<div class="iform">
+      <div class="fg">
+        <div><label>Date</label><input type="date" id="ml-dt" value="${tod()}" max="2026-04-05"></div>
+        <div><label>Quarter</label><select id="ml-q"><option value="Q1">Q1 Apr–Jun 2025</option><option value="Q2">Q2 Jul–Sep 2025</option><option value="Q3">Q3 Oct–Dec 2025</option><option value="Q4" selected>Q4 Jan–Mar 2026</option></select></div>
+        <div><label>From</label><input type="text" id="ml-fr" placeholder="Home / Gateshead"></div>
+        <div><label>To</label><input type="text" id="ml-to" placeholder="Job site or customer address"></div>
+        <div><label>Miles</label><input type="number" id="ml-mi" step="0.1" min="0.1" placeholder="0.0"></div>
+        <div><label>Purpose</label><input type="text" id="ml-pu" placeholder="e.g. Bathroom refit — 14 Oak St"></div>
+        <div class="s2"><label>Notes (optional)</label><input type="text" id="ml-no"></div>
+      </div>
+      <div class="frow">
+        <button class="btn btn-primary" onclick="addMileageJourney()"><i class="ti ti-check" aria-hidden="true"></i>Save journey</button>
+        <button class="btn btn-outline" onclick="S.addMileage=false;rMain()">Cancel</button>
+      </div>
+    </div>` : ''}
+
+    <div style="padding:12px 24px">
+      <div class="card">
+        <div class="ch"><span class="ct">Journey log</span><span class="xs mu">${detailed.length} journeys · ${totalMiles.toFixed(1)} miles · ${fmt(totalClaim)} claimable</span></div>
+        <div class="tbl-wrap"><table class="tbl">
+          <thead><tr><th style="width:10%">Date</th><th style="width:13%">From</th><th style="width:13%">To</th><th style="width:26%">Purpose</th><th style="width:6%">Q</th><th style="width:8%">Miles</th><th style="width:10%">Claim</th><th style="width:7%">Rate</th><th style="width:7%"></th></tr></thead>
+          <tbody>
+          ${detailed.length ? detailed.map(m => `<tr>
+            <td class="xs mu">${fds(m.journey_date)}</td>
+            <td class="xs mu">${m.from_location||'—'}</td>
+            <td class="xs mu">${m.to_location||'—'}</td>
+            <td class="xs fw">${m.purpose}</td>
+            <td>${bdg('b-rv',m.quarter)}</td>
+            <td class="fw">${m.miles}</td>
+            <td class="fw" style="color:var(--green)">${fmt(m.claim)}</td>
+            <td class="xs mu">${m.claim/m.miles >= 0.44?'45p':'25p'}</td>
+            <td><button class="del-btn" onclick="delMileage('${m.id}')"><i class="ti ti-trash" aria-hidden="true"></i></button></td>
+          </tr>`).join('') : '<tr><td colspan="9" class="empty">No journeys logged yet.</td></tr>'}
+          </tbody>
+        </table></div>
+        ${detailed.length ? `<div style="padding:9px 14px;background:var(--surface);border-top:1px solid var(--border);display:flex;justify-content:space-between;font-size:12.5px">
+          <span style="color:var(--text-mid)">${totalMiles.toFixed(1)} total miles</span>
+          <span style="font-weight:600;color:var(--green)">${fmt(totalClaim)} total claim</span>
+        </div>` : ''}
+      </div>
+    </div>
+  </div>`
+}
+
 
 // ── CSV Import ────────────────────────────────────────────────────
 
@@ -890,7 +968,156 @@ async function overwriteFromCsv(inp) {
 
 // ── Mileage actions ───────────────────────────────────────────────
 
-async function addMileageJourney() {
+function previewQMiles(q) {
+  const inp = document.getElementById('qmi-' + q)
+  const el  = document.getElementById('qclaim-' + q)
+  if (!inp || !el) return
+  const miles = parseFloat(inp.value) || 0
+  if (!miles) { el.textContent = '—'; return }
+  // Calculate cumulative from previous quarters
+  const qs = ['Q1','Q2','Q3','Q4']
+  const qIdx = qs.indexOf(q)
+  let cumPre = 0
+  for (let i = 0; i < qIdx; i++) {
+    const prevInp = document.getElementById('qmi-' + qs[i])
+    cumPre += prevInp ? (parseFloat(prevInp.value) || 0) : 0
+    // Also add logged miles for previous quarters not overridden
+  }
+  // Add logged miles from previous quarters
+  S.mileage.filter(m => m.quarter < q).forEach(m => {
+    const prevInp = document.getElementById('qmi-' + m.quarter)
+    if (!prevInp || !prevInp.value) cumPre += Number(m.miles)
+  })
+  const cumAfter = cumPre + miles
+  let claim = 0
+  if (cumPre >= MILEAGE_RATES.threshold) {
+    claim = miles * MILEAGE_RATES.high
+  } else if (cumAfter > MILEAGE_RATES.threshold) {
+    claim = (MILEAGE_RATES.threshold - cumPre) * MILEAGE_RATES.low + (cumAfter - MILEAGE_RATES.threshold) * MILEAGE_RATES.high
+  } else {
+    claim = miles * MILEAGE_RATES.low
+  }
+  el.textContent = '£' + claim.toFixed(2)
+}
+
+function previewAnnualMiles() {
+  const inp = document.getElementById('ann-miles')
+  const prev = document.getElementById('ann-preview')
+  const brk  = document.getElementById('ann-breakdown')
+  if (!inp || !prev) return
+  const total = parseFloat(inp.value) || 0
+  if (!total) { prev.innerHTML = '<div style="font-size:12px;color:var(--text-lt)">Enter miles to see claim</div>'; brk.innerHTML=''; return }
+  const perQ = total / 4
+  let cum = 0, totalClaim = 0
+  const rows = ['Q1','Q2','Q3','Q4'].map(q => {
+    const miles = perQ
+    let claim = 0
+    const before = cum; cum += miles
+    if (before >= 10000) { claim = miles * 0.25 }
+    else if (cum > 10000) { claim = (10000-before)*0.45 + (cum-10000)*0.25 }
+    else { claim = miles * 0.45 }
+    totalClaim += claim
+    return `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;border-bottom:1px solid var(--border)">
+      <span style="color:var(--text-mid)">${q} — ${miles.toFixed(0)} miles</span>
+      <span style="font-weight:500;color:var(--green)">£${claim.toFixed(2)}</span>
+    </div>`
+  }).join('')
+  prev.innerHTML = `<div style="font-size:11px;color:var(--text-lt)">Total claim</div><div style="font-size:22px;font-weight:700;color:var(--green)">£${totalClaim.toFixed(2)}</div><div style="font-size:11px;color:var(--text-lt)">split across 4 quarters</div>`
+  brk.innerHTML = `<div style="padding:10px;background:var(--surface);border-radius:7px;margin-bottom:12px">${rows}</div>`
+}
+
+async function saveQuarterlyMiles(q) {
+  const inp = document.getElementById('qmi-' + q)
+  const miles = parseFloat(inp?.value) || 0
+  if (!miles) return alert('Enter miles for ' + q + ' first')
+
+  // Remove existing logged miles for this quarter
+  const existing = S.mileage.filter(m => m.quarter === q)
+  for (const m of existing) {
+    await api('DELETE', `/api/mileage/${m.id}`)
+    S.mileage = S.mileage.filter(x => x.id !== m.id)
+  }
+  // Log the quarterly total
+  const dates = { Q1:'2025-06-30', Q2:'2025-09-30', Q3:'2025-12-31', Q4:'2026-03-31' }
+  const row = await api('POST', '/api/mileage', {
+    journey_date: dates[q], quarter: q, from_location: 'Various',
+    to_location: 'Various', purpose: `${q} total business mileage`, miles, notes: 'Quarterly total',
+  })
+  S.mileage.push(row)
+
+  // Calculate claim for this quarter using cumulative
+  const sorted = [...S.mileage].sort((a,b) => a.journey_date.localeCompare(b.journey_date))
+  const pre = sorted.filter(m => m.quarter < q)
+  const { totalClaim: preClaim } = calcMileage(pre)
+  const { totalClaim: combined } = calcMileage([...pre, [row].map(r => ({...r, miles: Number(r.miles)})).flat()])
+  const claim = Math.round((combined - preClaim) * 100) / 100
+
+  // Remove existing mileage entry in MTD for this quarter, then add fresh
+  const existing_tx = S.txs.filter(t => t.quarter === q && t.description && t.description.includes('HMRC mileage claim'))
+  for (const t of existing_tx) {
+    await api('DELETE', `/api/transactions/${t.id}`)
+    S.txs = S.txs.filter(x => x.id !== t.id)
+  }
+  // Add to MTD
+  const tx = await api('POST', '/api/transactions', {
+    transaction_date: dates[q],
+    description: `HMRC mileage claim — ${q} 2025/26`,
+    amount: claim, direction: 'expense', category: 'travel', quarter: q,
+    pay_method: 'bank', notes: `${miles.toFixed(0)} miles × AMAP rate`,
+  })
+  S.txs.push(tx)
+  showToast(`${q}: ${miles.toFixed(0)} miles = £${claim.toFixed(2)} added to MTD`)
+  rMain()
+}
+
+async function saveAnnualMiles() {
+  const inp = document.getElementById('ann-miles')
+  const total = parseFloat(inp?.value) || 0
+  if (!total) return alert('Enter your total miles first')
+  if (!confirm(`Add ${total.toFixed(0)} miles (split evenly across Q1–Q4) to your mileage log and MTD records?`)) return
+
+  const perQ = total / 4
+  const qs = ['Q1','Q2','Q3','Q4']
+  const dates = { Q1:'2025-06-30', Q2:'2025-09-30', Q3:'2025-12-31', Q4:'2026-03-31' }
+
+  // Clear existing mileage log and MTD mileage entries
+  for (const m of [...S.mileage]) {
+    await api('DELETE', `/api/mileage/${m.id}`)
+  }
+  S.mileage = []
+  const mileageTxs = S.txs.filter(t => t.description && t.description.includes('HMRC mileage claim'))
+  for (const t of mileageTxs) { await api('DELETE', `/api/transactions/${t.id}`) }
+  S.txs = S.txs.filter(t => !(t.description && t.description.includes('HMRC mileage claim')))
+
+  // Add quarterly entries
+  let cum = 0
+  for (const q of qs) {
+    const miles = perQ
+    const before = cum; cum += miles
+    let claim = 0
+    if (before >= 10000) { claim = miles * 0.25 }
+    else if (cum > 10000) { claim = (10000-before)*0.45 + (cum-10000)*0.25 }
+    else { claim = miles * 0.45 }
+    claim = Math.round(claim * 100) / 100
+
+    const row = await api('POST', '/api/mileage', {
+      journey_date: dates[q], quarter: q, from_location: 'Various',
+      to_location: 'Various', purpose: `${q} total business mileage (annual split)`, miles, notes: `Annual total: ${total.toFixed(0)} miles ÷ 4`,
+    })
+    S.mileage.push(row)
+
+    const tx = await api('POST', '/api/transactions', {
+      transaction_date: dates[q],
+      description: `HMRC mileage claim — ${q} 2025/26`,
+      amount: claim, direction: 'expense', category: 'travel', quarter: q,
+      pay_method: 'bank', notes: `${miles.toFixed(0)} miles × AMAP rate (annual total: ${total.toFixed(0)} mi)`,
+    })
+    S.txs.push(tx)
+  }
+  const totalClaim = S.txs.filter(t => t.description && t.description.includes('HMRC mileage claim')).reduce((s,t) => s + Number(t.amount), 0)
+  showToast(`${total.toFixed(0)} miles = £${totalClaim.toFixed(2)} added across all quarters`)
+  rMain()
+}
   const m = { journey_date: v('ml-dt'), quarter: v('ml-q'), from_location: v('ml-fr'), to_location: v('ml-to'), miles: fv('ml-mi'), purpose: v('ml-pu'), notes: v('ml-no') }
   if (!m.journey_date || !m.purpose || !m.miles) return alert('Date, purpose and miles are required.')
   try {
@@ -959,7 +1186,7 @@ async function confirmCsvImport() {
 
 // ── Expose globals ────────────────────────────────────────────────
 
-Object.assign(window, { go, rMain, S, doAdd, delTx, confirmClear, doClear, doExport, exportTaxSummary, rAddCats, loadAll, addMileageJourney, delMileage, addMileageToMTD, exportMileage, handleCsvUpload, confirmCsvImport, archiveAndClear, overwriteFromCsv })
+Object.assign(window, { go, rMain, S, doAdd, delTx, confirmClear, doClear, doExport, exportTaxSummary, rAddCats, loadAll, addMileageJourney, delMileage, addMileageToMTD, exportMileage, handleCsvUpload, confirmCsvImport, archiveAndClear, overwriteFromCsv, previewQMiles, previewAnnualMiles, saveQuarterlyMiles, saveAnnualMiles })
 
 // ── Init ──────────────────────────────────────────────────────────
 
